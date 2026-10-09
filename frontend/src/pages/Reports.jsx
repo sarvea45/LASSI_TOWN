@@ -77,6 +77,34 @@ export default function Reports() {
     fetchAllData(startDate, endDate);
   };
 
+  const exportToCSV = () => {
+    const headers = ['Date', 'Bill No', 'Order Type', 'Payment Method', 'Base Amount', 'CGST (2.5%)', 'SGST (2.5%)', 'Discount', 'Grand Total'];
+    const rows = salesData.transactions.map(tx => {
+      const dateStr = new Date(tx.created_at).toLocaleString('en-GB').replace(/,/g, '');
+      const cgst = ((tx.tax_total || 0) / 2).toFixed(2);
+      const sgst = ((tx.tax_total || 0) / 2).toFixed(2);
+      return [
+        dateStr,
+        tx.display_id,
+        tx.order_type || 'N/A',
+        tx.payment_method,
+        (tx.subtotal || 0).toFixed(2),
+        cgst,
+        sgst,
+        (tx.discount_amount || 0).toFixed(2),
+        (tx.net_total || 0).toFixed(2)
+      ].join(',');
+    });
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `GST_Report_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (loading && salesData.transactions.length === 0) {
     return <div className="p-8 text-slate-500 font-bold">Loading analytics...</div>;
   }
@@ -347,8 +375,12 @@ export default function Reports() {
             ))}
           </div>
 
-          {/* Custom Range */}
-          <div className="flex items-center gap-2 bg-white p-2 rounded shadow-sm border border-slate-300">
+          <div className="flex items-center gap-3">
+            <button onClick={exportToCSV} className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded shadow-sm text-sm whitespace-nowrap">
+              Export GST Report (CSV)
+            </button>
+            {/* Custom Range */}
+            <div className="flex items-center gap-2 bg-white p-2 rounded shadow-sm border border-slate-300">
             <input 
               type="date" 
               value={startDate} 
@@ -368,6 +400,7 @@ export default function Reports() {
             >
               <Search size={16} />
             </button>
+          </div>
           </div>
         </div>
       </div>

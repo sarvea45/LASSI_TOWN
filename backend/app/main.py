@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth_router, menu_router, shift_router, order_router, reports_router
+from .routers import auth_router, menu_router, shift_router, order_router, reports_router, users_router, ledger_router
 
 app = FastAPI(title="Lassi Town POS API")
 
@@ -17,7 +17,11 @@ app.include_router(menu_router.router)
 app.include_router(shift_router.router)
 app.include_router(order_router.router)
 app.include_router(reports_router.router)
+app.include_router(users_router.router)
+app.include_router(ledger_router.router)
 
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Welcome to Lassi Town POS API"}
+
+

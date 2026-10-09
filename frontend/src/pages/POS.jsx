@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import useStore from '../store/useStore';
@@ -32,6 +32,7 @@ export default function POS() {
     heldOrders, holdOrder, resumeOrder
   } = useStore();
 
+  const [showLiveView, setShowLiveView] = useState(false);
   const [showOrdersDrawer, setShowOrdersDrawer] = useState(false);
   const [todayOrders, setTodayOrders] = useState([]);
 
@@ -108,17 +109,64 @@ export default function POS() {
     if (searchInputRef.current) searchInputRef.current.focus();
   };
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return;
-    const matched = products.find(p => p.name.toLowerCase().includes(query));
-    if (matched) {
-      handleProductClick(matched);
-      setSearchQuery('');
-    } else {
-      setToast('Item not found!');
-      setTimeout(() => setToast(''), 2000);
+  const getRelevanceScore = (product, query) => {
+    if (!query) return 0;
+    const q = query.trim().toLowerCase();
+    const pName = product.name.toLowerCase();
+    const pCat = product.category.toLowerCase();
+    const variantNames = product.variants.map(v => v.variant_name.toLowerCase()).join(' ');
+
+    if (pName === q) return 100;
+    if (pCat === q) return 80;
+    if (pName.startsWith(q)) return 75;
+    if (pCat.includes(q)) return 60;
+
+    const searchTarget = pName + " " + variantNames;
+    const words = q.split(/\s+/);
+    if (words.every(w => searchTarget.includes(w))) return 50;
+    
+    return 0;
+  };
+
+  const getFilteredProducts = () => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      return products.filter(p => p.is_active && p.category === activeCategory);
+    }
+    
+    // Score all active products
+    const scored = products
+      .filter(p => p.is_active)
+      .map(p => ({ product: p, score: getRelevanceScore(p, q) }))
+      .filter(item => item.score > 0);
+      
+    // Sort descending by score
+    scored.sort((a, b) => b.score - a.score);
+    
+    return scored.map(item => item.product);
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const q = searchQuery.trim().toLowerCase();
+      if (!q) return;
+      
+      const filtered = getFilteredProducts();
+      if (filtered.length > 0) {
+        const topItem = filtered[0];
+        if (getRelevanceScore(topItem, q) === 100) {
+          handleProductClick(topItem);
+          setSearchQuery('');
+          if (searchInputRef.current) searchInputRef.current.focus();
+        } else {
+          setToast('No exact match found (Score 100). Please select manually.');
+          setTimeout(() => setToast(''), 2000);
+        }
+      } else {
+        setToast('No items found.');
+        setTimeout(() => setToast(''), 2000);
+      }
     }
   };
 
@@ -136,6 +184,71 @@ export default function POS() {
   if (isNC) {
     total = 0; // Non-Chargeable drops total to 0
   }
+
+  const getLiveMetrics = () => {
+    let activeTablesCount = 0;
+    let totalUnsettled = 0;
+    let kotItems = 0;
+    let pendingTakeawayDelivery = (heldOrders || []).length;
+    const activeTableList = [];
+
+    // Calculate from heldOrders too with optional chaining
+    (heldOrders || []).forEach(ho => {
+      let hoSub = 0;
+      (ho?.cart || []).forEach(item => { hoSub += ((item?.price || 0) * (item?.qty || 0)); });
+      let hoNet = hoSub * 1.05; // rough tax
+      totalUnsettled += hoNet;
+      activeTableList.push({
+        id: 'HELD ' + (ho?.id || '').slice(-4),
+        order_type: ho?.orderConfig?.order_type || 'UNKNOWN',
+        startTime: ho?.timestamp ? new Date(ho.timestamp).getTime() : Date.now(),
+        netTotal: hoNet || 0,
+        status: 'ON HOLD'
+      });
+    });
+
+    Object.values(tables || {}).forEach(t => {
+      if (t?.cart?.length > 0) {
+        if (t.id !== 'DIRECT') activeTablesCount++;
+        else pendingTakeawayDelivery++;
+        
+        let tableSubtotal = 0;
+        t.cart.forEach(item => {
+          tableSubtotal += ((item?.price || 0) * (item?.qty || 0));
+          if (item?.printed_in_kot) kotItems += (item?.qty || 0);
+        });
+
+        let discountAmt = 0;
+        const discType = t?.discount?.type || 'NONE';
+        const discVal = t?.discount?.value || 0;
+        
+        if (discType === 'PERCENT') discountAmt = tableSubtotal * (discVal / 100);
+        if (discType === 'FLAT') discountAmt = discVal;
+        
+        let subAfterDiscount = Math.max(0, tableSubtotal - discountAmt);
+        
+        let tableNet = subAfterDiscount * 1.05;
+        if (t?.isNC) tableNet = 0;
+        
+        totalUnsettled += (tableNet || 0);
+
+        activeTableList.push({
+          id: t?.id || 'UNKNOWN',
+          order_type: t?.orderConfig?.order_type || 'UNKNOWN',
+          startTime: t?.startTime || Date.now(),
+          netTotal: tableNet || 0,
+          status: t?.status || 'UNKNOWN'
+        });
+      }
+    });
+
+    return { activeTablesCount, totalUnsettled, kotItems, pendingTakeawayDelivery, activeTableList };
+  };
+
+  const liveMetrics = React.useMemo(() => {
+    if (!showLiveView) return null;
+    return getLiveMetrics();
+  }, [showLiveView, tables, heldOrders]);
 
   const doPrint = (itemsToPrint, isEstimate, displayId = null, existingWindow = null) => {
     if (itemsToPrint.length === 0) return;
@@ -251,6 +364,14 @@ export default function POS() {
             <span>-${discountAmount.toFixed(2)}</span>
           </div>
           ` : ''}
+          <div class="flex-between bold" style="font-size: 11px;">
+            <span>CGST (2.5%)</span>
+            <span>${cgst.toFixed(2)}</span>
+          </div>
+          <div class="flex-between bold" style="font-size: 11px;">
+            <span>SGST (2.5%)</span>
+            <span>${sgst.toFixed(2)}</span>
+          </div>
           ${dashedLine}
           <div class="flex-between bold" style="font-size: 14px;">
             <span></span>
@@ -354,9 +475,8 @@ export default function POS() {
           {activeTableId === 'DIRECT' ? `DIRECT (${orderConfig.order_type})` : `TABLE ${activeTableId}`}
         </div>
 
-        {/* Search / Shortcode Bar */}
         <div className="flex-1 max-w-xl mx-4 relative">
-          <form onSubmit={handleSearchSubmit} className="relative">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               ref={searchInputRef}
@@ -364,9 +484,10 @@ export default function POS() {
               placeholder="Search Item / Short Code (e.g. 101)" 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
               className="w-full bg-slate-800 border-none text-white px-10 py-2 rounded shadow-inner focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-slate-500 font-bold"
             />
-          </form>
+          </div>
         </div>
 
         {/* Top Right Utilities */}
@@ -375,10 +496,7 @@ export default function POS() {
             <Pause size={14} /> Hold
           </button>
           <button 
-            onClick={() => {
-              setToast('Live View Activated');
-              setTimeout(() => setToast(''), 2000);
-            }} 
+            onClick={() => setShowLiveView(true)} 
             className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-xs font-bold transition-colors text-green-400"
           >
             <Activity size={14} /> Live View
@@ -427,7 +545,7 @@ export default function POS() {
         {/* Column 2: Product Grid */}
         <div className="flex-1 bg-slate-200 h-full overflow-y-auto p-2">
           <div className="grid grid-cols-4 xl:grid-cols-5 gap-2 content-start pb-20">
-            {products.filter(p => p.category === activeCategory && p.is_active).map(product => (
+            {getFilteredProducts().map(product => (
               <button
                 key={product.id}
                 onClick={() => handleProductClick(product)}
@@ -727,6 +845,61 @@ export default function POS() {
           </div>
         </div>
       )}
+            {showLiveView && liveMetrics && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex justify-end">
+            <div className="w-[500px] bg-slate-900 h-full shadow-2xl flex flex-col text-slate-100">
+              <div className="bg-black/40 p-5 flex justify-between items-center border-b border-slate-800 shrink-0">
+                <h2 className="font-black text-2xl flex items-center gap-2 text-green-400">
+                  <Activity size={24} /> REAL-TIME FLOOR
+                </h2>
+                <button onClick={() => setShowLiveView(false)} className="text-slate-400 hover:text-white font-bold text-sm bg-slate-800 px-3 py-1 rounded">CLOSE</button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-5">
+                <div className="grid grid-cols-2 gap-4 mb-8">
+                  <div className="bg-slate-800 rounded-lg p-5 border border-slate-700 flex flex-col justify-center items-center">
+                    <div className="text-slate-400 text-xs font-bold tracking-widest uppercase mb-1">Unsettled Revenue</div>
+                    <div className="text-4xl font-black text-red-500">₹{liveMetrics.totalUnsettled.toFixed(2)}</div>
+                  </div>
+                  <div className="bg-slate-800 rounded-lg p-5 border border-slate-700 flex flex-col justify-center items-center">
+                    <div className="text-slate-400 text-xs font-bold tracking-widest uppercase mb-1">Active Tables</div>
+                    <div className="text-4xl font-black text-blue-400">{liveMetrics.activeTablesCount}</div>
+                  </div>
+                  <div className="bg-slate-800 rounded-lg p-5 border border-slate-700 flex flex-col justify-center items-center">
+                    <div className="text-slate-400 text-xs font-bold tracking-widest uppercase mb-1">Cooking (KOT)</div>
+                    <div className="text-4xl font-black text-orange-400">{liveMetrics.kotItems}</div>
+                  </div>
+                  <div className="bg-slate-800 rounded-lg p-5 border border-slate-700 flex flex-col justify-center items-center">
+                    <div className="text-slate-400 text-xs font-bold tracking-widest uppercase mb-1">Pending/Held</div>
+                    <div className="text-4xl font-black text-purple-400">{liveMetrics.pendingTakeawayDelivery}</div>
+                  </div>
+                </div>
+
+                <h3 className="text-xs font-bold tracking-widest text-slate-500 uppercase border-b border-slate-800 pb-2 mb-4">Active Carts Snapshot</h3>
+                <div className="space-y-3">
+                  {liveMetrics.activeTableList.sort((a, b) => a.startTime - b.startTime).map((t, idx) => (
+                    <div key={idx} className="bg-slate-800 p-4 rounded border border-slate-700 flex justify-between items-center">
+                      <div>
+                        <div className="font-black text-lg text-white">
+                          {t.id === 'DIRECT' ? `DIRECT (${t.order_type})` : t.id.startsWith('HELD') ? t.id : `Table ${t.id}`}
+                        </div>
+                        <div className="text-xs font-bold text-slate-400">
+                          {t.startTime ? Math.floor((Date.now() - t.startTime)/60000) + ' min ago' : 'Just now'} • {t.status}
+                        </div>
+                      </div>
+                      <div className="text-2xl font-black text-green-400">
+                        ₹{t.netTotal.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                  {liveMetrics.activeTableList.length === 0 && (
+                    <div className="text-slate-500 font-bold text-center italic py-10">No active tables. Floor is empty.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+      )}
       {/* Orders Drawer Modal */}
       {showOrdersDrawer && (
         <div className="fixed inset-0 bg-black/60 z-50 flex justify-end">
@@ -810,4 +983,9 @@ export default function POS() {
     </div>
   );
 }
+
+
+
+
+
 

@@ -47,6 +47,12 @@ def print_receipt_job(order_data: dict):
         
         p.set(align='left')
         p.text(f"Order: {order_data.get('display_id')}\n")
+        
+        if order_data.get('created_at'):
+            from datetime import datetime
+            dt = datetime.fromisoformat(order_data['created_at'])
+            p.text(f"Date: {dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            
         p.text(f"Payment: {order_data.get('payment_method')}\n")
         p.text("-" * 32 + "\n")
         
@@ -57,11 +63,23 @@ def print_receipt_job(order_data: dict):
             p.text(f"{qty}x {name[:15]:<15} {qty*price:>10.2f}\n")
             
         p.text("-" * 32 + "\n")
-        p.text(f"Subtotal:      {order_data.get('subtotal', 0.0):>10.2f}\n")
-        p.text(f"CGST (2.5%):   {float(order_data.get('tax_total', 0.0))/2:>10.2f}\n")
-        p.text(f"SGST (2.5%):   {float(order_data.get('tax_total', 0.0))/2:>10.2f}\n")
+        
+        subtotal = float(order_data.get('subtotal', 0.0))
+        tax_total = float(order_data.get('tax_total', 0.0))
+        discount = float(order_data.get('discount_amount', 0.0))
+        net_total = float(order_data.get('net_total', 0.0))
+        
+        p.text(f"Subtotal:      {subtotal:>10.2f}\n")
+        
+        if discount > 0:
+            p.text(f"Discount:     -{discount:>10.2f}\n")
+            
+        p.text(f"CGST (2.5%):   {tax_total/2:>10.2f}\n")
+        p.text(f"SGST (2.5%):   {tax_total/2:>10.2f}\n")
+        
+        p.text("-" * 32 + "\n")
         p.set(align='right', text_type='B')
-        p.text(f"Total:         {order_data.get('net_total', 0.0):>10.2f}\n")
+        p.text(f"GRAND TOTAL:   {net_total:>10.2f}\n")
         p.set(align='left', text_type='normal')
         
         p.text("\nThank you for visiting!\n\n")

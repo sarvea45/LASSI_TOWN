@@ -131,7 +131,24 @@ def seed_menu():
     for cat in menu:
         category_name = cat["category"]
         for item in cat["items"]:
-            prod = Product(category=category_name, name=item[0], is_active=True)
+            # Format explicit item name
+            raw_name = item[0]
+            
+            # Auto-append category name to raw_name if it's missing (for beverages/desserts)
+            # and if the category is not pizzas/starters where it might be redundant
+            skip_append = ['STARTER', 'PIZZA', 'RICE', 'NOODLE', 'MOMO', 'NUGGET', 'SNACK']
+            if not any(s in category_name.upper() for s in skip_append) and not ('WRAP' in category_name.upper()):
+                # e.g., if category is "COLD COFFEE" and name is "Hard Rock"
+                if category_name.lower() not in raw_name.lower():
+                    # Handle special cases where category name might be weird to append directly
+                    suffix = category_name.title()
+                    if suffix == "Lassi" or suffix == "Cold Coffee" or suffix == "Thickshakes" or suffix == "Shakes" or suffix == "Freakshakes" or suffix == "Smoothies" or suffix == "Mojito":
+                        if suffix.endswith('s'): suffix = suffix[:-1] # Remove plural
+                        raw_name = f"{raw_name} {suffix}"
+            
+            # But the user asked for Pizzas & Variants to be flattened OR indexed in search.
+            # It's cleaner to keep the schema intact and handle indexing in POS.jsx.
+            prod = Product(category=category_name, name=raw_name, is_active=True)
             db.add(prod)
             db.flush()
             

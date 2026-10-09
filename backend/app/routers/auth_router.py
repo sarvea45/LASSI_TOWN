@@ -21,8 +21,19 @@ def login_admin(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 
 @router.post("/login/pos", response_model=Token)
 def login_pos(login_data: POSLogin, db: Session = Depends(get_db)):
-    # Look up by unhashed pin_code per PRD Phase 1 simplifications
     user = db.query(User).filter(User.pin_code == login_data.pin_code).first()
+    
+    if not user:
+        users = db.query(User).filter(User.is_active == True).all()
+        for u in users:
+            if u.pin_code and len(u.pin_code) > 10:
+                try:
+                    if verify_password(login_data.pin_code, u.pin_code):
+                        user = u
+                        break
+                except Exception:
+                    pass
+    
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect PIN")
         

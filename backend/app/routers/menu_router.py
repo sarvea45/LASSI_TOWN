@@ -108,3 +108,24 @@ def delete_product(product_id: UUID, db: Session = Depends(get_db), current_user
     db.delete(db_product)
     db.commit()
     return {"detail": "Product deleted"}
+from pydantic import BaseModel
+class CategoryRename(BaseModel):
+    old_name: str
+    new_name: str
+
+@router.put("/categories/rename")
+def rename_category(payload: CategoryRename, db: Session = Depends(get_db), current_user: User = Depends(get_manager_user)):
+    products = db.query(Product).filter(Product.category == payload.old_name).all()
+    for p in products:
+        p.category = payload.new_name
+    db.commit()
+    return {"detail": "Renamed"}
+
+@router.delete("/categories/{category_name}")
+def delete_category(category_name: str, db: Session = Depends(get_db), current_user: User = Depends(get_manager_user)):
+    products = db.query(Product).filter(Product.category == category_name).all()
+    for p in products:
+        db.query(ProductVariant).filter(ProductVariant.product_id == p.id).delete()
+        db.delete(p)
+    db.commit()
+    return {"detail": "Category deleted"}

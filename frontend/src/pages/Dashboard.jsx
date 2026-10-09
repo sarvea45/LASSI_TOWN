@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
-import { LogOut } from 'lucide-react';
+import { LogOut, DollarSign } from 'lucide-react';
+import api from '../api';
 
 export default function Dashboard() {
   const { tables, setActiveTable, setOrderConfig, clearAuth, addTable } = useStore();
@@ -9,6 +10,26 @@ export default function Dashboard() {
   const [now, setNow] = useState(Date.now());
   const [showAddTableModal, setShowAddTableModal] = useState(false);
   const [newTableId, setNewTableId] = useState('');
+  
+  const [showLedgerModal, setShowLedgerModal] = useState(false);
+  const [ledgerForm, setLedgerForm] = useState({ amount: '', transaction_type: 'PAYOUT', notes: '' });
+
+  const handleLedgerSubmit = async (e) => {
+    e.preventDefault();
+    if (!ledgerForm.amount) return;
+    try {
+      await api.post('/api/ledger', {
+        amount: parseFloat(ledgerForm.amount),
+        transaction_type: ledgerForm.transaction_type,
+        notes: ledgerForm.notes
+      });
+      alert('Ledger entry saved!');
+      setShowLedgerModal(false);
+      setLedgerForm({ amount: '', transaction_type: 'PAYOUT', notes: '' });
+    } catch(err) {
+      alert('Failed to save entry');
+    }
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000); // update every minute
@@ -51,6 +72,53 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-100 select-none font-sans">
       
+      {/* Ledger Modal */}
+      {showLedgerModal && (
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-[100]">
+          <div className="bg-white rounded p-6 shadow-xl w-96">
+            <h2 className="text-xl font-black text-slate-800 mb-4">Petty Cash / Ledger</h2>
+            <form onSubmit={handleLedgerSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase">Type</label>
+                <select 
+                  value={ledgerForm.transaction_type} 
+                  onChange={e => setLedgerForm({...ledgerForm, transaction_type: e.target.value})}
+                  className="w-full border border-slate-300 p-2 rounded mt-1 font-bold"
+                >
+                  <option value="FLOAT">Cash In (Float)</option>
+                  <option value="PAYOUT">Cash Out (Expense)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase">Amount (₹)</label>
+                <input 
+                  type="number" 
+                  value={ledgerForm.amount}
+                  onChange={e => setLedgerForm({...ledgerForm, amount: e.target.value})}
+                  className="w-full border border-slate-300 p-2 rounded mt-1 font-bold"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase">Reason</label>
+                <input 
+                  type="text" 
+                  value={ledgerForm.notes}
+                  onChange={e => setLedgerForm({...ledgerForm, notes: e.target.value})}
+                  className="w-full border border-slate-300 p-2 rounded mt-1 font-bold"
+                  placeholder="e.g. Milk, Supplies"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowLedgerModal(false)} className="px-4 py-2 bg-slate-200 rounded font-bold">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold">Save Entry</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Add Table Modal */}
       {showAddTableModal && (
         <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-[100]">
